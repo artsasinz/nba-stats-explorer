@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+.vscode/
+*.pyc
+.streamlit/secrets.toml
+pipeline.py
+drop_table.py
+table_view.py
+test.py
