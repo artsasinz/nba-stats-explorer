@@ -484,6 +484,17 @@ def get_player_shot_types(player):
 # 3. HELPERS
 # =====================================================================
 
+def is_compact_layout():
+    """True on phones, or when the link ends with ?compact=1 in pc testing."""
+    if st.query_params.get("compact") == "1":
+        return True
+    try:
+        agent = st.context.headers.get("User-Agent", "")
+    except Exception:
+        return False
+    return any(word in agent for word in ("Mobi", "iPhone", "Android"))
+
+
 def as_list(value):
     """None -> [],  "abc" -> ["abc"],  ["a", "b"] -> ["a", "b"]"""
     if value is None:
@@ -567,10 +578,18 @@ def player_metric_rank(box, label, value, rank_column, profile, player, higher_i
         box.caption(f"Not enough attempts")
 
 
-def show_chart(fig):
+def show_chart(fig, shrink=True):
     """Draw a plotly chart at the full width of its column."""
     
-    st.plotly_chart(fig, width= 'stretch')
+    config = {}
+    if COMPACT:
+        fig.update_xaxes(fixedrange=True)
+        fig.update_yaxes(fixedrange=True)
+        fig.update_layout(font=dict(size=11), legend=dict(font=dict(size=10)))
+        if shrink:
+            fig.update_layout(height=min(fig.layout.height or 450, 380))
+        config = {"displayModeBar": False} 
+    st.plotly_chart(fig, width= 'stretch', config=config)
 
 
 def shot_shares(table):
@@ -938,7 +957,7 @@ def show_league_header():
 
     logo_box, title_box = st.columns([1, 3.5], gap="small", vertical_alignment="center")
     with logo_box:
-        st.image(nba_logo_url(), width=200)      
+        st.image(nba_logo_url(), width=100 if COMPACT else 200)      
     with title_box:
         st.header(f"{selected_szn} Season League overview")
         st.caption(f"See who's the leader of this season")
@@ -1046,8 +1065,9 @@ def show_league_shot_type():
     for team in sorted(team_rows, key=lambda t: team_rows[t]["Rim"], reverse=True):
         rows[team] = team_rows[team]
 
-    with st.expander("Click to Expand", expanded=True):
-        show_chart(shot_type_chart(rows, use_logos=True, row_height=50))
+    with st.expander("Click to Expand", expanded=not COMPACT):
+        show_chart(shot_type_chart(rows, use_logos=not COMPACT, 
+                                   row_height=40 if COMPACT else 50), shrink=False)
 
 
 def show_league_view():
@@ -1387,14 +1407,29 @@ def show_player_view(player):
 # =====================================================================
 
 # --- Sidebar: choose a team first, then a player ---
-selected_szn = st.sidebar.selectbox("Season", get_season_list())
 
-team = st.sidebar.selectbox("Team", ["All teams"] + get_team_list())
+# check if user device is phone
+COMPACT = is_compact_layout()
+
+picker = st.expander("Select the categories", expanded=True) if COMPACT else st.sidebar
+
+selected_szn = picker.selectbox("Season", get_season_list())
+
+team = picker.selectbox("Team", ["All teams"] + get_team_list())
 
 if team == "All teams":
-    player = st.sidebar.selectbox("Player", ["All players"] + get_player_list())
+    player = picker.selectbox("Player", ["All players"] + get_player_list())
 else:
-    player = st.sidebar.selectbox("Player", ["Whole team"] + get_player_list(team))
+    player = picker.selectbox("Player", ["Whole team"] + get_player_list(team))
+
+if COMPACT:
+    st.markdown("""
+        <style>
+        [data-testid="stMainBlockContainer"] { padding: 1rem 0.75rem 3rem; }
+        [data-testid="stMetricValue"] { font-size: 1.6rem; }
+        h1 { font-size: 1.8rem; } h2 { font-size: 1.5rem; } h3 { font-size: 1.2rem; }
+        </style>
+        """, unsafe_allow_html=True)
 
 if team == "All teams" and player == "All players":
     page = "league"
