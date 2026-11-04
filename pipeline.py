@@ -76,6 +76,20 @@ def transform(df, szn):
     return df
 
 
+def select_season(szn=None):
+    """ 'All' for all SEASONS.
+        If no parameter entered, run only newest season """
+        
+    if szn == "All":
+        season = SEASONS
+    elif szn is None:
+        season = [SEASONS[-1]]
+    elif isinstance(szn, str):
+        season = [szn]
+        
+    return season
+
+
 def load(df, szn, db_path="nba_analytics.duckdb"):
     con = duckdb.connect(db_path)
     
@@ -184,8 +198,12 @@ def run_shot_zone_pipeline(seasons):
 
 
 if __name__ == "__main__":
-    run_pipeline(seasons= SEASONS)
-    run_shot_zone_pipeline(seasons= SEASONS)
+    """ Default: Run the only newest season only.
+        Change the 'season = select_season(...) to change the excuted result """
+    # no parameter = newest season only
+    season = select_season()
+    run_pipeline(seasons= season)
+    run_shot_zone_pipeline(seasons= season)
     
     with duckdb.connect("nba_analytics.duckdb") as con:
         con.execute("VACUUM")

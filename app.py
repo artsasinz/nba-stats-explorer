@@ -10,6 +10,7 @@ How this file is organized:
     6. MAIN         the sidebar, and deciding which page to show
 """
 
+import os
 import duckdb
 import plotly.express as px
 import plotly.graph_objects as go
@@ -25,7 +26,10 @@ from nba_api.stats.static import teams as nba_teams
 DB_PATH = "./nba_analytics.duckdb"
 
 # This must be the first Streamlit command in the file.
-st.set_page_config(page_title="NBA Stats Explorer", layout="wide")
+st.set_page_config(page_title="NBA Stats Explorer", 
+                   layout="wide",
+                   initial_sidebar_state="expanded",
+                   )
 
 # Make the page be flexible to vary sizes.
 st.markdown(
@@ -116,10 +120,16 @@ SHOT_COLORS = [GREEN, GOLD, "#B388FF", "#75AAE3", "#4A7FC1"]
 # Every function below asks DuckDB one question and returns a table.
 # =====================================================================
 
-@st.cache_data
+
 def query(sql, params=None):
-    """Run one SQL query and return the result as a pandas table.
-    @st.cache_data remembers the answer, so the same query is only run once."""
+    """Runs a query. The database file's modified time is part of the cache key."""
+    return run_query(sql, params, os.path.getmtime(DB_PATH))
+
+
+@st.cache_data
+def run_query(sql, params, db_modified):    # 'db_modified' only for change cache
+    """Run one SQL query and return the result as a pandas table."""
+    
     connection = duckdb.connect(DB_PATH, read_only=True)
     try:
         return connection.execute(sql, params or []).df()
@@ -492,7 +502,11 @@ def is_compact_layout():
         agent = st.context.headers.get("User-Agent", "")
     except Exception:
         return False
-    return any(word in agent for word in ("Mobi", "iPhone", "Android"))
+    
+    is_iphone = "iPhone" in agent
+    is_android_phone = ("Android" in agent) and ("Mobile" in agent)
+
+    return is_iphone or is_android_phone
 
 
 def as_list(value):
@@ -581,13 +595,21 @@ def player_metric_rank(box, label, value, rank_column, profile, player, higher_i
 def show_chart(fig, shrink=True):
     """Draw a plotly chart at the full width of its column."""
     
-    config = {}
+    config = {"responsive": True,}
     if COMPACT:
         fig.update_xaxes(fixedrange=True)
         fig.update_yaxes(fixedrange=True)
-        fig.update_layout(font=dict(size=11), legend=dict(font=dict(size=10)))
+        fig.update_layout(font=dict(size=11), 
+                          legend=dict(font=dict(size=9),
+                          orientation="h",
+                          yanchor="bottom",
+                          y=1.02,
+                          xanchor="center",
+                          x=0.5
+                        ),
+                        margin=dict(l=15, r=15, t=35, b=25))
         if shrink:
-            fig.update_layout(height=min(fig.layout.height or 450, 380))
+            fig.update_layout(height=min(fig.layout.height or 450, 420))
         config = {"displayModeBar": False} 
     st.plotly_chart(fig, width= 'stretch', config=config)
 
@@ -852,7 +874,7 @@ def radar_chart(df, metrics, label_col, team, height=450):
                                        + "<extra></extra>")
     fig.update_layout(
         height=height,
-        margin=dict(l=70, r=70, t=30, b=50),    # room so the labels are not cut off
+        margin=dict(l=40, r=40, t=20, b=20),    # room so the labels are not cut off
         polar=dict(bgcolor="rgba(0,0,0,0)",
                    radialaxis=dict(range=[0, 100], tickvals=[25, 50, 75, 100],
                                    showticklabels=False)),
@@ -994,21 +1016,23 @@ def show_league_header():
                 st.metric(label, "N/A")
             continue
         
-        best = l_profile.loc[l_profile[column].idxmax() if highest else l_profile[column].idxmin()]
-        abbr = best["Team"]
+        # 'WINS' matter in only tie-breaker sitaution
+        best = valid_teams.sort_values([column, "WINS"], ascending=[not highest, False]).iloc[0]
+        leader_abbr = best["Team"]
         
         with box:
             text_col, logo_col = st.columns([2, 1.5], gap="small", vertical_alignment="center")
-            text_col.metric(label, abbr)
-            logo_col.image(team_logo_url(abbr), width=60)
+            text_col.metric(label, leader_abbr)
+            logo_col.image(team_logo_url(leader_abbr), width=60)
             st.caption(fmt.format(best[column]))   
     
     # Player Leader
     st.divider()
-    st.subheader(f"{selected_szn} Season Player Leaders")
+    st.subheader(f"{selected_szn} Season Player Leaders", help="at least 8 games played")
     
     p_profile = get_player_profile()
-    p_profile.loc[p_profile["FG3M_PG"] * p_profile["Games"] < 82, "FG3_PCT"] = None     # official NBA rule
+    team_games = p_profile["Games"].max()
+    p_profile.loc[p_profile["FG3M_PG"] * p_profile["Games"] < team_games, "FG3_PCT"] = None     # official NBA rule
     p_leaders = [
         ("Scoring Leader",  "PPG",       True, "{:.1f} PPG"),
         ("Rebounds Leader", "REB_PG",    True, "{:.1f} RPG"),
@@ -1025,15 +1049,17 @@ def show_league_header():
                 st.caption("Season just started")
             continue
         
-        best = p_profile.loc[p_profile[column].idxmax() if highest else p_profile[column].idxmin()]
-        player = best["Player"]
+        # 'Games' matter in only tie-breaker sitaution
+        best = valid_players.sort_values([column, "Games"], ascending=[not highest, False]).iloc[0]
+        leader = best["Player"]
         team_abbr = best["Team"]
         
         with box:
             st.badge(label)
-            st.markdown(f"**{player}**")
+            st.markdown(f"**{leader}**")
             st.caption(f"{fmt.format(best[column])} | ({team_abbr})")
-            st.image(player_headshot_url(player), width=190)           
+            if player_headshot_url(leader):
+                st.image(player_headshot_url(leader), width=190)           
     
 
 def show_league_efficiency_section():
@@ -1425,7 +1451,12 @@ else:
 if COMPACT:
     st.markdown("""
         <style>
-        [data-testid="stMainBlockContainer"] { padding: 1rem 0.75rem 3rem; }
+        [data-testid="stMainBlockContainer"] { 
+            padding-top: 4.5rem !important; 
+            padding-left: 0.75rem !important; 
+            padding-right: 0.75rem !important; 
+            padding-bottom: 3rem !important;
+            }
         [data-testid="stMetricValue"] { font-size: 1.6rem; }
         h1 { font-size: 1.8rem; } h2 { font-size: 1.5rem; } h3 { font-size: 1.2rem; }
         </style>
